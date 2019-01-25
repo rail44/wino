@@ -4,6 +4,7 @@
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 extern crate atom_syndication;
+extern crate chrono;
 extern crate console_error_panic_hook;
 extern crate futures;
 extern crate rss;
@@ -18,62 +19,74 @@ extern crate web_sys;
 extern crate wee_alloc;
 
 use atom_syndication::Feed as AtomFeed;
+use chrono::{DateTime, FixedOffset};
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
-use squark::{App, Child, Runtime, Task, View};
+use rss::Channel;
+use squark::{App, Child, HandlerArg, Runtime, Task, View};
 use squark_macros::view;
 use squark_web::WebRuntime;
 use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::str::FromStr;
 use wasm_bindgen::prelude::*;
-use web_sys::{console, window};
+use web_sys::window;
 
 mod fetch;
 
 #[derive(Clone, Debug)]
 enum Action {
+    UpdateNewFeedUrl(String),
+    AddFeed,
     Fetched(String, String),
-    Click,
+    Reload,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
 struct Feed {
     title: String,
-    link: String,
     url: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct Article {
-    feed_title: String,
+    feed_url: String,
     title: String,
-    date: String,
+    date: DateTime<FixedOffset>,
     url: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct State {
+    new_feed_url: String,
+    is_loading_new_feed: bool,
     article_map: HashMap<String, Article>,
-    feed_list: Vec<Feed>,
+    feed_map: HashMap<String, Feed>,
+}
+
+impl Feed {
+    fn from_atom(url: String, atom: &AtomFeed) -> Self {
+        Feed {
+            title: atom.title().to_string(),
+            url: url.clone(),
+        }
+    }
+
+    fn from_rss(url: String, channel: &Channel) -> Self {
+        Feed {
+            title: channel.title().to_string(),
+            url: url.clone(),
+        }
+    }
 }
 
 impl Default for State {
     fn default() -> State {
         State {
+            new_feed_url: String::new(),
+            is_loading_new_feed: false,
             article_map: HashMap::new(),
-            feed_list: vec![
-                Feed {
-                    title: "GIGAZINE".to_owned(),
-                    link: "".to_owned(),
-                    url: "https://gigazine.net/news/rss_atom/".to_owned(),
-                },
-                Feed {
-                    title: "ギズモード・ジャパン".to_owned(),
-                    link: "".to_owned(),
-                    url: "https://rustwasm.github.io/feed.xml".to_owned(),
-                },
-            ],
+            feed_map: HashMap::new(),
         }
     }
 }
@@ -87,54 +100,119 @@ impl App for WinoApp {
     fn reducer(&self, mut state: State, action: Action) -> (State, Task<Action>) {
         let mut task = Task::empty();
         match action {
-            Action::Click => {
-                for feed in state.feed_list.clone().into_iter() {
-                    let future = fetch::get(&feed.url)
-                        .map(move |body| Action::Fetched(feed.title.to_owned(), body.as_string().unwrap()))
-                        .map_err(|_| ());
-                    task.push(Box::new(future));
-                }
+            Action::UpdateNewFeedUrl(url) => {
+                state.new_feed_url = url;
+                (state, task)
             }
-            Action::Fetched(feed_title, resp) => {
-                let feed = AtomFeed::from_str(&resp).unwrap();
-                for entry in feed.entries() {
-                    let date = entry.published().unwrap_or("").to_string();
+            Action::AddFeed => {
+                let new_feed_url = state.new_feed_url.clone();
+                let future = fetch::get(&state.new_feed_url)
+                    .map(move |body| Action::Fetched(new_feed_url, body.as_string().unwrap()))
+                    .map_err(|_| ());
+                task.push(Box::new(future));
+                state.new_feed_url = "".to_string();
+                (state, task)
+            }
+            Action::Reload => {
+                {
+                    let feed_list = state.feed_map.values().cloned();
+                    for feed in feed_list {
+                        let future = fetch::get(&feed.url)
+                            .map(move |body| {
+                                Action::Fetched(feed.url.to_owned(), body.as_string().unwrap())
+                            })
+                            .map_err(|_| ());
+                        task.push(Box::new(future));
+                    }
+                }
+                (state, task)
+            }
+
+            Action::Fetched(feed_url, resp) => {
+                if let Ok(atom) = AtomFeed::from_str(&resp) {
+                    let feed = Feed::from_atom(feed_url.clone(), &atom);
+                    state.feed_map.insert(feed_url.clone(), feed);
+
+                    for entry in atom.entries() {
+                        let date =
+                            DateTime::parse_from_rfc3339(entry.published().unwrap_or("")).unwrap();
+                        let article = Article {
+                            feed_url: feed_url.clone(),
+                            title: entry.title().to_string(),
+                            url: entry
+                                .links()
+                                .get(0)
+                                .map_or("", |link| link.href())
+                                .to_string(),
+                            date,
+                        };
+                        let id = entry.id();
+                        state.article_map.insert(id.to_string(), article);
+                    }
+                    return (state, task);
+                }
+
+                let rss = Channel::from_str(&resp).unwrap();
+                let feed = Feed::from_rss(feed_url.clone(), &rss);
+                state.feed_map.insert(feed_url.clone(), feed);
+
+                for item in rss.items() {
+                    let date = DateTime::parse_from_rfc2822(item.pub_date().unwrap_or("")).unwrap();
                     let article = Article {
-                        feed_title: feed_title.clone(),
-                        title: entry.title().to_string(),
-                        url: entry
-                            .links()
-                            .get(0)
-                            .map_or("", |link| link.href())
-                            .to_string(),
+                        feed_url: feed_url.clone(),
+                        title: item.title().unwrap_or("").to_string(),
+                        url: item.link().unwrap_or("").to_string(),
                         date,
                     };
-                    let id = entry.id();
+                    let id = item.guid().map_or("", |guid| guid.value());
                     state.article_map.insert(id.to_string(), article);
                 }
 
-                console::log_1(&feed.title().into());
+                (state, task)
             }
-        };
-        (state, task)
+        }
     }
 
     fn view(&self, state: State) -> View<Action> {
         view! {
             <div>
                 <h1>wino</h1>
-                <button onclick={ |_| Some(Action::Click) }>button</button>
-                <ul>
-                {
-                    let mut article_vec = Vec::from_iter(state.article_map.values());
-                    article_vec.sort_by(|a, b| b.date.cmp(&a.date));
-                    Child::from_iter(
-                        article_vec.iter().map(|article| {
-                            view! { <li>{ article.feed_title.clone() }: <a target="_blank" href={ article.url.clone() }>{ article.title.clone() }</a></li> }
-                        })
-                    )
-                }
-                </ul>
+                <input
+                    value={ state.new_feed_url.clone() }
+                    oninput={ |v| match v {
+                        HandlerArg::String(v) => Some(Action::UpdateNewFeedUrl(v)),
+                        _ => None,
+                    } }
+                />
+                <button onclick={ |_| Some(Action::AddFeed) }>button</button>
+                <button onclick={ |_| Some(Action::Reload) }>reload</button>
+                <section>
+                    <h2>Feeds</h2>
+                    <ul>
+                    {
+                        Child::from_iter(
+                            state.feed_map.values().map(|feed| {
+                                view! { <li>{ feed.title.clone() }</li> }
+                            })
+                        )
+                    }
+                    </ul>
+                </section>
+                <section>
+                    <h2>Articles</h2>
+                    <ul>
+                    {
+                        let mut article_vec = Vec::from_iter(state.article_map.values());
+                        article_vec.sort_by(|a, b| b.date.cmp(&a.date));
+                        Child::from_iter(
+                            article_vec.iter().map(|article| {
+                                let feed = state.feed_map.get(&article.feed_url).unwrap();
+                                view! { <li>{ feed.title.clone() }: <a target="_blank" href={ article.url.clone() }>{ article.title.clone() }</a></li> }
+                            })
+                        )
+                    }
+                    </ul>
+                </section>
             </div>
         }
     }
