@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::str::FromStr;
 use wasm_bindgen::prelude::*;
-use web_sys::window;
+use web_sys::{console, window};
 
 mod fetch;
 
@@ -91,6 +91,12 @@ impl Default for State {
     }
 }
 
+fn parse_date(s: &str) -> DateTime<FixedOffset> {
+    DateTime::parse_from_rfc3339(s)
+        .or_else(|_| DateTime::parse_from_rfc2822(s))
+        .unwrap()
+}
+
 #[derive(Clone, Debug)]
 struct WinoApp;
 impl App for WinoApp {
@@ -134,8 +140,7 @@ impl App for WinoApp {
                     state.feed_map.insert(feed_url.clone(), feed);
 
                     for entry in atom.entries() {
-                        let date =
-                            DateTime::parse_from_rfc3339(entry.published().unwrap_or("")).unwrap();
+                        let date = parse_date(entry.published().unwrap_or(""));
                         let article = Article {
                             feed_url: feed_url.clone(),
                             title: entry.title().to_string(),
@@ -155,17 +160,23 @@ impl App for WinoApp {
                 let rss = Channel::from_str(&resp).unwrap();
                 let feed = Feed::from_rss(feed_url.clone(), &rss);
                 state.feed_map.insert(feed_url.clone(), feed);
-
                 for item in rss.items() {
-                    let date = DateTime::parse_from_rfc2822(item.pub_date().unwrap_or("")).unwrap();
+                    let date_str = item.pub_date().or_else(|| {
+                        item.dublin_core_ext()
+                            .map(|dce| dce.dates())
+                            .and_then(|date| date.get(0))
+                            .map(|s| s.as_str())
+                    }).unwrap_or("");
+                    let date = parse_date(date_str);
+                    let url = item.link().unwrap_or("").to_string();
                     let article = Article {
                         feed_url: feed_url.clone(),
                         title: item.title().unwrap_or("").to_string(),
-                        url: item.link().unwrap_or("").to_string(),
+                        url: url.clone(),
                         date,
                     };
-                    let id = item.guid().map_or("", |guid| guid.value());
-                    state.article_map.insert(id.to_string(), article);
+                    let id = item.guid().map_or(url, |guid| guid.value().to_string());
+                    state.article_map.insert(id, article);
                 }
 
                 (state, task)
