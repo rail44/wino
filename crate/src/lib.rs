@@ -33,7 +33,7 @@ mod fetch;
 
 #[derive(Clone, Debug)]
 enum Action {
-    Fetched(JsValue),
+    Fetched(String, String),
     Click,
 }
 
@@ -46,6 +46,7 @@ struct Feed {
 
 #[derive(Clone, Debug, PartialEq)]
 struct Article {
+    feed_title: String,
     title: String,
     date: String,
     url: String,
@@ -87,18 +88,19 @@ impl App for WinoApp {
         let mut task = Task::empty();
         match action {
             Action::Click => {
-                for feed in state.feed_list.iter() {
+                for feed in state.feed_list.clone().into_iter() {
                     let future = fetch::get(&feed.url)
-                        .map(Action::Fetched)
+                        .map(move |body| Action::Fetched(feed.title.to_owned(), body.as_string().unwrap()))
                         .map_err(|_| ());
                     task.push(Box::new(future));
                 }
             }
-            Action::Fetched(resp) => {
-                let feed = AtomFeed::from_str(&resp.as_string().unwrap()).unwrap();
+            Action::Fetched(feed_title, resp) => {
+                let feed = AtomFeed::from_str(&resp).unwrap();
                 for entry in feed.entries() {
                     let date = entry.published().unwrap_or("").to_string();
                     let article = Article {
+                        feed_title: feed_title.clone(),
                         title: entry.title().to_string(),
                         url: entry
                             .links()
@@ -110,6 +112,7 @@ impl App for WinoApp {
                     let id = entry.id();
                     state.article_map.insert(id.to_string(), article);
                 }
+
                 console::log_1(&feed.title().into());
             }
         };
@@ -126,8 +129,8 @@ impl App for WinoApp {
                     let mut article_vec = Vec::from_iter(state.article_map.values());
                     article_vec.sort_by(|a, b| b.date.cmp(&a.date));
                     Child::from_iter(
-                        article_vec.iter().map(|feed| {
-                            view! { <li><a target="_blank" href={ feed.url.clone() }>{ feed.title.clone() }</a></li> }
+                        article_vec.iter().map(|article| {
+                            view! { <li>{ article.feed_title.clone() }: <a target="_blank" href={ article.url.clone() }>{ article.title.clone() }</a></li> }
                         })
                     )
                 }
