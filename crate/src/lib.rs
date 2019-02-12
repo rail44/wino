@@ -18,11 +18,11 @@ extern crate wasm_bindgen_futures;
 extern crate web_sys;
 extern crate wee_alloc;
 
-use atom_syndication::Feed as AtomFeed;
+use atom_syndication::{Feed as AtomFeed, Entry};
 use chrono::{DateTime, FixedOffset};
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
-use rss::Channel;
+use rss::{Channel, Item};
 use squark::{App, Child, HandlerArg, Runtime, Task, View};
 use squark_macros::view;
 use squark_web::WebRuntime;
@@ -54,6 +54,39 @@ struct Article {
     title: String,
     date: DateTime<FixedOffset>,
     url: String,
+}
+
+impl Article {
+    fn from_atom(feed_url: String, entry: &Entry) -> Self {
+        let date = parse_date(entry.published().unwrap_or(""));
+        Article {
+            feed_url,
+            title: entry.title().to_string(),
+            url: entry
+                .links()
+                .get(0)
+                .map_or("", |link| link.href())
+                .to_string(),
+                date,
+        }
+    }
+
+    fn from_rss(feed_url: String, item: &Item) -> Self {
+        let date_str = item.pub_date().or_else(|| {
+            item.dublin_core_ext()
+                .map(|dce| dce.dates())
+                .and_then(|date| date.get(0))
+                .map(|s| s.as_str())
+        }).unwrap_or("");
+        let date = parse_date(date_str);
+        let url = item.link().unwrap_or("").to_string();
+        Article {
+            feed_url,
+            title: item.title().unwrap_or("").to_string(),
+            url: url.clone(),
+            date,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -140,19 +173,8 @@ impl App for WinoApp {
                     state.feed_map.insert(feed_url.clone(), feed);
 
                     for entry in atom.entries() {
-                        let date = parse_date(entry.published().unwrap_or(""));
-                        let article = Article {
-                            feed_url: feed_url.clone(),
-                            title: entry.title().to_string(),
-                            url: entry
-                                .links()
-                                .get(0)
-                                .map_or("", |link| link.href())
-                                .to_string(),
-                            date,
-                        };
                         let id = entry.id();
-                        state.article_map.insert(id.to_string(), article);
+                        state.article_map.insert(id.to_string(), Article::from_atom(feed_url.clone(), entry));
                     }
                     return (state, task);
                 }
@@ -161,21 +183,8 @@ impl App for WinoApp {
                 let feed = Feed::from_rss(feed_url.clone(), &rss);
                 state.feed_map.insert(feed_url.clone(), feed);
                 for item in rss.items() {
-                    let date_str = item.pub_date().or_else(|| {
-                        item.dublin_core_ext()
-                            .map(|dce| dce.dates())
-                            .and_then(|date| date.get(0))
-                            .map(|s| s.as_str())
-                    }).unwrap_or("");
-                    let date = parse_date(date_str);
-                    let url = item.link().unwrap_or("").to_string();
-                    let article = Article {
-                        feed_url: feed_url.clone(),
-                        title: item.title().unwrap_or("").to_string(),
-                        url: url.clone(),
-                        date,
-                    };
-                    let id = item.guid().map_or(url, |guid| guid.value().to_string());
+                    let article = Article::from_rss(feed_url.clone(), item);
+                    let id = item.guid().map_or_else(|| article.url.clone(), |guid| guid.value().to_string());
                     state.article_map.insert(id, article);
                 }
 
@@ -188,15 +197,25 @@ impl App for WinoApp {
         view! {
             <div>
                 <h1>wino</h1>
-                <input
-                    value={ state.new_feed_url.clone() }
-                    oninput={ |v| match v {
-                        HandlerArg::String(v) => Some(Action::UpdateNewFeedUrl(v)),
-                        _ => None,
-                    } }
-                />
-                <button onclick={ |_| Some(Action::AddFeed) }>button</button>
-                <button onclick={ |_| Some(Action::Reload) }>reload</button>
+                <section>
+                    <input
+                        value={ state.new_feed_url.clone() }
+                        oninput={ |v| match v {
+                            HandlerArg::String(v) => Some(Action::UpdateNewFeedUrl(v)),
+                            _ => None,
+                        } }
+                        onkeydown={ |v| match v {
+                            HandlerArg::String(ref v) if v.as_str() == "Enter" => {
+                                Some(Action::AddFeed)
+                            }
+                            _ => None,
+                        } }
+                    />
+                    <button onclick={ |_| Some(Action::AddFeed) }>button</button>
+                </section>
+                <section>
+                    <button onclick={ |_| Some(Action::Reload) }>reload</button>
+                </section>
                 <section>
                     <h2>Feeds</h2>
                     <ul>
