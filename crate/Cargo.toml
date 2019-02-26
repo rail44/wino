@@ -14,7 +14,6 @@ crate-type = ["cdylib"]
 [dependencies]
 wasm-bindgen = "0.2.25"
 console_error_panic_hook = "0.1.5"
-wee_alloc = "0.4.2"
 squark = "0.7.0"
 squark-macros = "0.7.0"
 squark-web = "0.3.0"
@@ -40,4 +39,5 @@ features = [
   "RequestInit",
   "RequestMode",
   "Response",
+  "Storage",
 ]

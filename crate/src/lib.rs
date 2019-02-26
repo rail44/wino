@@ -1,8 +1,5 @@
 #![feature(proc_macro_hygiene)]
 
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
 extern crate atom_syndication;
 extern crate chrono;
 extern crate console_error_panic_hook;
@@ -16,10 +13,9 @@ extern crate squark_web;
 extern crate wasm_bindgen;
 extern crate wasm_bindgen_futures;
 extern crate web_sys;
-extern crate wee_alloc;
 
 use atom_syndication::{Feed as AtomFeed, Entry};
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
 use rss::{Channel, Item};
@@ -42,25 +38,36 @@ enum Action {
     Reload,
 }
 
-#[derive(Clone, Debug, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq)]
 struct Feed {
     title: String,
     url: String,
+    article_map: HashMap<String, Article>,
+    updated: DateTime<Utc>,
+}
+
+impl Default for Feed {
+    fn default() -> Self {
+        Feed {
+            title: String::default(),
+            url: String::default(),
+            article_map: HashMap::default(),
+            updated: Utc::now(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct Article {
-    feed_url: String,
     title: String,
     date: DateTime<FixedOffset>,
     url: String,
 }
 
 impl Article {
-    fn from_atom(feed_url: String, entry: &Entry) -> Self {
+    fn from_atom(entry: &Entry) -> Self {
         let date = parse_date(entry.published().unwrap_or(""));
         Article {
-            feed_url,
             title: entry.title().to_string(),
             url: entry
                 .links()
@@ -71,7 +78,7 @@ impl Article {
         }
     }
 
-    fn from_rss(feed_url: String, item: &Item) -> Self {
+    fn from_rss(item: &Item) -> Self {
         let date_str = item.pub_date().or_else(|| {
             item.dublin_core_ext()
                 .map(|dce| dce.dates())
@@ -81,7 +88,6 @@ impl Article {
         let date = parse_date(date_str);
         let url = item.link().unwrap_or("").to_string();
         Article {
-            feed_url,
             title: item.title().unwrap_or("").to_string(),
             url: url.clone(),
             date,
@@ -93,22 +99,39 @@ impl Article {
 struct State {
     new_feed_url: String,
     is_loading_new_feed: bool,
-    article_map: HashMap<String, Article>,
     feed_map: HashMap<String, Feed>,
 }
 
 impl Feed {
     fn from_atom(url: String, atom: &AtomFeed) -> Self {
+        let mut article_map = HashMap::new();
+
+        for entry in atom.entries() {
+            let id = entry.id();
+            article_map.insert(id.to_string(), Article::from_atom(entry));
+        }
+
         Feed {
+            article_map,
             title: atom.title().to_string(),
             url: url.clone(),
+            updated: Utc::now(),
         }
     }
 
     fn from_rss(url: String, channel: &Channel) -> Self {
+        let mut article_map = HashMap::default();
+        for item in channel.items() {
+            let article = Article::from_rss(item);
+            let id = item.guid().map_or_else(|| article.url.clone(), |guid| guid.value().to_string());
+            article_map.insert(id, article);
+        }
+
         Feed {
+            article_map,
             title: channel.title().to_string(),
             url: url.clone(),
+            updated: Utc::now(),
         }
     }
 }
@@ -118,7 +141,6 @@ impl Default for State {
         State {
             new_feed_url: String::new(),
             is_loading_new_feed: false,
-            article_map: HashMap::new(),
             feed_map: HashMap::new(),
         }
     }
@@ -172,22 +194,12 @@ impl App for WinoApp {
                     let feed = Feed::from_atom(feed_url.clone(), &atom);
                     state.feed_map.insert(feed_url.clone(), feed);
 
-                    for entry in atom.entries() {
-                        let id = entry.id();
-                        state.article_map.insert(id.to_string(), Article::from_atom(feed_url.clone(), entry));
-                    }
                     return (state, task);
                 }
 
                 let rss = Channel::from_str(&resp).unwrap();
                 let feed = Feed::from_rss(feed_url.clone(), &rss);
                 state.feed_map.insert(feed_url.clone(), feed);
-                for item in rss.items() {
-                    let article = Article::from_rss(feed_url.clone(), item);
-                    let id = item.guid().map_or_else(|| article.url.clone(), |guid| guid.value().to_string());
-                    state.article_map.insert(id, article);
-                }
-
                 (state, task)
             }
         }
@@ -232,12 +244,18 @@ impl App for WinoApp {
                     <h2>Articles</h2>
                     <ul>
                     {
-                        let mut article_vec = Vec::from_iter(state.article_map.values());
-                        article_vec.sort_by(|a, b| b.date.cmp(&a.date));
+                        let iter = state.feed_map
+                            .values()
+                            .flat_map(|feed| {
+                                feed.article_map
+                                    .values()
+                                    .map(move |article| (feed.title.clone(), article))
+                            });
+                        let mut article_vec = Vec::from_iter(iter);
+                        article_vec.sort_by(|(_, a), (_, b)| b.date.cmp(&a.date));
                         Child::from_iter(
-                            article_vec.iter().map(|article| {
-                                let feed = state.feed_map.get(&article.feed_url).unwrap();
-                                view! { <li>{ feed.title.clone() }: <a target="_blank" href={ article.url.clone() }>{ article.title.clone() }</a></li> }
+                            article_vec.iter().map(|(feed_title, article)| {
+                                view! { <li>{ feed_title.clone() }: <a target="_blank" href={ article.url.clone() }>{ article.title.clone() }</a></li> }
                             })
                         )
                     }
