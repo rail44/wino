@@ -13,9 +13,10 @@ extern crate squark_web;
 extern crate wasm_bindgen;
 extern crate wasm_bindgen_futures;
 extern crate web_sys;
+extern crate js_sys;
 
 use atom_syndication::{Feed as AtomFeed, Entry};
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset};
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
 use rss::{Channel, Item};
@@ -27,6 +28,7 @@ use std::iter::FromIterator;
 use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 use web_sys::{console, window};
+use js_sys::{Date};
 
 mod fetch;
 
@@ -43,7 +45,7 @@ struct Feed {
     title: String,
     url: String,
     article_map: HashMap<String, Article>,
-    updated: DateTime<Utc>,
+    updated: f64,
 }
 
 impl Default for Feed {
@@ -52,7 +54,7 @@ impl Default for Feed {
             title: String::default(),
             url: String::default(),
             article_map: HashMap::default(),
-            updated: Utc::now(),
+            updated: Date::now(),
         }
     }
 }
@@ -115,7 +117,7 @@ impl Feed {
             article_map,
             title: atom.title().to_string(),
             url: url.clone(),
-            updated: Utc::now(),
+            updated: Date::now(),
         }
     }
 
@@ -131,7 +133,7 @@ impl Feed {
             article_map,
             title: channel.title().to_string(),
             url: url.clone(),
-            updated: Utc::now(),
+            updated: Date::now(),
         }
     }
 }
