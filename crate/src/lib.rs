@@ -22,6 +22,7 @@ use futures::Future;
 use rss::{Channel, Item};
 use squark::{App, Child, HandlerArg, Runtime, Task, View};
 use squark_macros::view;
+use serde::{Serialize, Deserialize};
 use squark_web::WebRuntime;
 use std::collections::HashMap;
 use std::iter::FromIterator;
@@ -32,6 +33,8 @@ use js_sys::{Date};
 
 mod fetch;
 
+const STATE_KEY: &'static str = "state";
+
 #[derive(Clone, Debug)]
 enum Action {
     UpdateNewFeedUrl(String),
@@ -40,7 +43,7 @@ enum Action {
     Reload,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 struct Feed {
     title: String,
     url: String,
@@ -59,7 +62,7 @@ impl Default for Feed {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Article {
     title: String,
     date: DateTime<FixedOffset>,
@@ -97,7 +100,7 @@ impl Article {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Serialize)]
 struct State {
     new_feed_url: String,
     is_loading_new_feed: bool,
@@ -156,11 +159,9 @@ fn parse_date(s: &str) -> DateTime<FixedOffset> {
 
 #[derive(Clone, Debug)]
 struct WinoApp;
-impl App for WinoApp {
-    type State = State;
-    type Action = Action;
 
-    fn reducer(&self, mut state: State, action: Action) -> (State, Task<Action>) {
+impl WinoApp {
+    fn _reducer(&self, mut state: State, action: Action) -> (State, Task<Action>) {
         let mut task = Task::empty();
         match action {
             Action::UpdateNewFeedUrl(url) => {
@@ -205,6 +206,20 @@ impl App for WinoApp {
                 (state, task)
             }
         }
+    }
+}
+
+impl App for WinoApp {
+    type State = State;
+    type Action = Action;
+
+    fn reducer(&self, state: State, action: Action) -> (State, Task<Action>) {
+        let (state, task) = self._reducer(state, action);
+
+        let window = window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        storage.set_item(STATE_KEY, &serde_json::to_string(&state).unwrap()).unwrap();
+        (state, task)
     }
 
     fn view(&self, state: State) -> View<Action> {
@@ -278,15 +293,24 @@ impl Default for WinoApp {
 pub fn run() {
     set_panic_hook();
 
+    let window = window().unwrap();
+
+    let storage = window.local_storage().unwrap().unwrap();
+
+    let state = storage
+        .get_item(STATE_KEY)
+        .unwrap()
+        .map(|s| serde_json::from_str(&s).unwrap())
+        .unwrap_or(State::default());
+
     WebRuntime::<WinoApp>::new(
-        window()
-            .unwrap()
+        window
             .document()
             .unwrap()
             .query_selector("#container")
             .unwrap()
             .unwrap(),
-        State::default(),
+        state
     )
     .run();
 }
