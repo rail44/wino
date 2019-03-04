@@ -13,12 +13,31 @@ use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::str::FromStr;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 use web_sys::{console, window};
-use js_sys::{Date};
+use js_sys::{Date, Promise};
 
 mod fetch;
 
 const STATE_KEY: &'static str = "state";
+
+fn timeout<T>(v: T, msec: i32) -> impl Future<Item = T, Error = ()> {
+    let p = Promise::new(&mut move |resolve, _| {
+        let closure = Closure::wrap(Box::new(move |_: JsValue| {
+            resolve.call0(&JsValue::null()).unwrap();
+        }) as Box<FnMut(_)>);
+        window().unwrap()
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                closure.as_ref().unchecked_ref(),
+                msec
+            ).unwrap();
+        closure.forget();
+    });
+    JsFuture::from(p)
+        .map(move |_|  v )
+        .map_err(|e| panic!("delay errored; err={:?}", e))
+}
 
 #[derive(Clone, Debug)]
 enum Action {
@@ -173,10 +192,10 @@ impl WinoApp {
                             .map_err(|_| ());
                         task.push(Box::new(future));
                     }
+                    task.push(Box::new(timeout(Action::Reload, 1000 * 60 * 5)));
                 }
                 (state, task)
             }
-
             Action::Fetched(feed_url, resp) => {
                 if let Ok(atom) = AtomFeed::from_str(&resp) {
                     let feed = Feed::from_atom(feed_url.clone(), &atom);
