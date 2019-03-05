@@ -30,12 +30,16 @@ use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{console, window};
+use web_sys::{console, window, VisibilityState};
 use js_sys::{Date, Promise};
 
 mod fetch;
 
 const STATE_KEY: &'static str = "state";
+const AUTO_RELOAD_MINUTES: i32 = 5;
+
+const DEFAULT_TITLE: &'static str = "wino";
+const HIGHLIGHT_TITLE: &'static str = "(*)wino";
 
 fn timeout<T>(v: T, msec: i32) -> impl Future<Item = T, Error = ()> {
     let p = Promise::new(&mut move |resolve, _| {
@@ -60,6 +64,7 @@ enum Action {
     AddFeed,
     Fetched(String, String),
     Reload,
+    AutoReload,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -121,9 +126,21 @@ impl Article {
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Serialize)]
 struct State {
+    manual_reloaded: bool,
     new_feed_url: String,
     is_loading_new_feed: bool,
     feed_map: HashMap<String, Feed>,
+}
+
+impl Default for State {
+    fn default() -> State {
+        State {
+            manual_reloaded: false,
+            new_feed_url: String::new(),
+            is_loading_new_feed: false,
+            feed_map: HashMap::new(),
+        }
+    }
 }
 
 impl Feed {
@@ -160,16 +177,6 @@ impl Feed {
     }
 }
 
-impl Default for State {
-    fn default() -> State {
-        State {
-            new_feed_url: String::new(),
-            is_loading_new_feed: false,
-            feed_map: HashMap::new(),
-        }
-    }
-}
-
 fn parse_date(s: &str) -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339(s)
         .or_else(|_| DateTime::parse_from_rfc2822(s))
@@ -196,6 +203,13 @@ impl WinoApp {
                 state.new_feed_url = "".to_string();
                 (state, task)
             }
+            Action::AutoReload => {
+                task.push(Box::new(timeout(Action::AutoReload, 1000 * 60 * AUTO_RELOAD_MINUTES)));
+                if state.manual_reloaded {
+                    task.push(Box::new(timeout(Action::Reload, 0)));
+                }
+                (state, task)
+            }
             Action::Reload => {
                 {
                     let feed_list = state.feed_map.values().cloned();
@@ -207,7 +221,6 @@ impl WinoApp {
                             .map_err(|_| ());
                         task.push(Box::new(future));
                     }
-                    task.push(Box::new(timeout(Action::Reload, 1000 * 60 * 5)));
                 }
                 (state, task)
             }
@@ -222,6 +235,7 @@ impl WinoApp {
                 let rss = Channel::from_str(&resp).unwrap();
                 let feed = Feed::from_rss(feed_url.clone(), &rss);
                 state.feed_map.insert(feed_url.clone(), feed);
+
                 (state, task)
             }
         }
@@ -233,11 +247,23 @@ impl App for WinoApp {
     type Action = Action;
 
     fn reducer(&self, state: State, action: Action) -> (State, Task<Action>) {
+        let old_state = state.clone();
+
         let (state, task) = self._reducer(state, action);
 
-        let window = window().unwrap();
-        let storage = window.local_storage().unwrap().unwrap();
-        storage.set_item(STATE_KEY, &serde_json::to_string(&state).unwrap()).unwrap();
+
+        if state != old_state {
+            let window = window().unwrap();
+            let document = window.document().unwrap();
+
+            if document.visibility_state() == VisibilityState::Hidden {
+                document.set_title(HIGHLIGHT_TITLE);
+            }
+
+            let storage = window.local_storage().unwrap().unwrap();
+            storage.set_item(STATE_KEY, &serde_json::to_string(&state).unwrap()).unwrap();
+        }
+
         (state, task)
     }
 
@@ -308,11 +334,21 @@ impl Default for WinoApp {
     }
 }
 
+fn on_visibility_change() {
+    let window = window().unwrap();
+    let document = window.document().unwrap();
+
+    if document.visibility_state() == VisibilityState::Visible {
+        document.set_title(DEFAULT_TITLE);
+    }
+}
+
 #[wasm_bindgen]
 pub fn run() {
     set_panic_hook();
 
     let window = window().unwrap();
+    let document = window.document().unwrap();
 
     let storage = window.local_storage().unwrap().unwrap();
 
@@ -322,14 +358,20 @@ pub fn run() {
         .map(|s| serde_json::from_str(&s).unwrap())
         .unwrap_or(State::default());
 
+    let mut task = Task::empty();
+    task.push(Box::new(timeout(Action::AutoReload, 1000 * 60 * AUTO_RELOAD_MINUTES)));
+
+    let closure = Closure::wrap(Box::new(on_visibility_change) as Box<Fn()>);
+    document.set_onvisibilitychange(
+        Some(closure.as_ref().unchecked_ref())
+    );
+    closure.forget();
+
+
     WebRuntime::<WinoApp>::new(
-        window
-            .document()
-            .unwrap()
-            .query_selector("#container")
+        document.query_selector("#container")
             .unwrap()
             .unwrap(),
         state
-    )
-    .run();
+    ).run_with_task(task);
 }

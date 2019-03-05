@@ -41,4 +41,5 @@ features = [
   "RequestMode",
   "Response",
   "Storage",
+  "VisibilityState",
 ]
