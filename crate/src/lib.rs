@@ -65,6 +65,7 @@ enum Action {
     Fetch(String),
     UpdateNewFeedUrl(String),
     RemoveFeed(String),
+    ToggleFeedVisible(String),
     AddFeed,
     Fetched(String, String),
     Reload,
@@ -144,6 +145,13 @@ impl WinoApp {
 
                 (state, task)
             }
+            Action::ToggleFeedVisible(url) => {
+                state.feed_map
+                    .entry(url)
+                    .and_modify(|f| { f.visible = !f.visible });
+
+                (state, task)
+            }
         }
     }
 }
@@ -203,10 +211,16 @@ impl App for WinoApp {
                     {
                         Child::from_iter(
                             state.feed_map.clone().into_iter().map(|(key, feed)| {
+                                let key_1 = key.clone();
                                 view! {
                                     <li>
+                                        <input
+                                            type="checkbox"
+                                            onclick={ move |_| Some(Action::ToggleFeedVisible(key.to_owned())) }
+                                            checked={feed.visible}
+                                        />
                                         { feed.title.clone() }
-                                        <button onclick={ move |_| Some(Action::RemoveFeed(key.to_owned())) }>x</button>
+                                        <button onclick={ move |_| Some(Action::RemoveFeed(key_1.to_owned())) }>x</button>
                                     </li>
                                 }
                             })
@@ -220,6 +234,7 @@ impl App for WinoApp {
                     {
                         let iter = state.feed_map
                             .values()
+                            .filter(|feed| feed.visible)
                             .flat_map(|feed| {
                                 feed.article_map
                                     .values()

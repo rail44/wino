@@ -24,11 +24,13 @@ impl Default for State {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
 pub struct Feed {
     pub title: String,
     pub url: String,
     pub article_map: HashMap<String, Article>,
     pub updated: f64,
+    pub visible: bool,
 }
 
 impl Default for Feed {
@@ -38,6 +40,7 @@ impl Default for Feed {
             url: String::default(),
             article_map: HashMap::default(),
             updated: Date::now(),
+            visible: true,
         }
     }
 }
@@ -53,9 +56,9 @@ impl Feed {
 
         Feed {
             article_map,
+            url,
             title: atom.title().to_string(),
-            url: url.clone(),
-            updated: Date::now(),
+            ..Default::default()
         }
     }
 
@@ -71,9 +74,9 @@ impl Feed {
 
         Feed {
             article_map,
+            url,
             title: channel.title().to_string(),
-            url: url.clone(),
-            updated: Date::now(),
+            ..Default::default()
         }
     }
 }
