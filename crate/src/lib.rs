@@ -210,16 +210,18 @@ impl App for WinoApp {
                     <ul>
                     {
                         Child::from_iter(
-                            state.feed_map.clone().into_iter().map(|(key, feed)| {
+                            state.feed_map.clone().into_iter().enumerate().map(|(i, (key, feed))| {
                                 let key_1 = key.clone();
+                                let id = format!("feed-{}-toggle", i);
                                 view! {
                                     <li>
                                         <input
                                             type="checkbox"
                                             onclick={ move |_| Some(Action::ToggleFeedVisible(key.to_owned())) }
                                             checked={feed.visible}
+                                            id={ id.clone() }
                                         />
-                                        { feed.title.clone() }
+                                        <label for={ id }>{ feed.title.clone() }</id>
                                         <button onclick={ move |_| Some(Action::RemoveFeed(key_1.to_owned())) }>x</button>
                                     </li>
                                 }
