@@ -19,6 +19,7 @@ use atom_syndication::Feed as AtomFeed;
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
 use js_sys::Promise;
+use js_sys::Function;
 use rss::Channel;
 use squark::{App, Child, HandlerArg, Runtime, Task, View};
 use squark_macros::view;
@@ -29,6 +30,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{console, window, VisibilityState};
+use serde_json::json;
 
 mod fetch;
 mod state;
@@ -41,27 +43,24 @@ const AUTO_RELOAD_MINUTES: i32 = 5;
 const DEFAULT_TITLE: &str = "wino";
 const HIGHLIGHT_TITLE: &str = "(*)wino";
 
-fn timeout<T>(v: T, msec: i32) -> impl Future<Item = T, Error = ()> {
-    let p = Promise::new(&mut move |resolve, _| {
-        let closure = Closure::wrap(Box::new(move |_: JsValue| {
-            resolve.call0(&JsValue::null()).unwrap();
-        }) as Box<FnMut(_)>);
-        window()
-            .unwrap()
-            .set_timeout_with_callback_and_timeout_and_arguments_0(
-                closure.as_ref().unchecked_ref(),
-                msec,
-            )
-            .unwrap();
-        closure.forget();
-    });
-    JsFuture::from(p)
-        .map(move |_| v)
-        .map_err(|e| panic!("delay errored; err={:?}", e))
+
+#[wasm_bindgen]
+extern "C" {
+    type Chrome;
+
+    static chrome: Chrome;
+    #[wasm_bindgen(method, getter)]
+    fn permissions(this: &Chrome) -> Permissions;
+
+    type Permissions;
+    #[wasm_bindgen(method)]
+    fn request(this: &Permissions, arg: &JsValue, cb: &Function);
 }
 
 #[derive(Clone, Debug)]
 enum Action {
+    Empty,
+    Fetch(String),
     UpdateNewFeedUrl(String),
     RemoveFeed(String),
     AddFeed,
@@ -77,14 +76,25 @@ impl WinoApp {
     fn _reducer(&self, mut state: State, action: Action) -> (State, Task<Action>) {
         let mut task = Task::empty();
         match action {
+            Action::Empty => (state, task),
             Action::UpdateNewFeedUrl(url) => {
                 state.new_feed_url = url;
                 (state, task)
             }
             Action::AddFeed => {
                 let new_feed_url = state.new_feed_url.clone();
-                let future = fetch::get(&state.new_feed_url)
-                    .map(move |body| Action::Fetched(new_feed_url, body.as_string().unwrap()))
+                let future = request_permission(&new_feed_url).map(|b| {
+                    if b {
+                        return Action::Fetch(new_feed_url);
+                    }
+                    Action::Empty
+                });
+                task.push(Box::new(future));
+                (state, task)
+            }
+            Action::Fetch(url) => {
+                let future = fetch::get(&url)
+                    .map(move |body| Action::Fetched(url, body.as_string().unwrap()))
                     .map_err(|_| ());
                 task.push(Box::new(future));
                 state.new_feed_url = "".to_string();
@@ -240,6 +250,41 @@ fn on_visibility_change() {
     if document.visibility_state() == VisibilityState::Visible {
         document.set_title(DEFAULT_TITLE);
     }
+}
+
+fn request_permission(url: &str) -> impl Future<Item = bool, Error = ()> {
+    let arg = json!({
+        "origins": [url]
+    });
+    let p = Promise::new(&mut move |resolve, _| {
+        let closure = Closure::wrap(Box::new(move |b: bool| {
+            resolve.call1(&JsValue::null(), &b.into()).unwrap();
+        }) as Box<FnMut(_)>);
+        chrome.permissions().request(&JsValue::from_serde(&arg).unwrap(), closure.as_ref().unchecked_ref());
+        closure.forget();
+    });
+    JsFuture::from(p)
+        .map(|b| b.as_bool().unwrap())
+        .map_err(|e| panic!("delay errored; err={:?}", e))
+}
+
+fn timeout<T>(v: T, msec: i32) -> impl Future<Item = T, Error = ()> {
+    let p = Promise::new(&mut move |resolve, _| {
+        let closure = Closure::wrap(Box::new(move |_: JsValue| {
+            resolve.call0(&JsValue::null()).unwrap();
+        }) as Box<FnMut(_)>);
+        window()
+            .unwrap()
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                closure.as_ref().unchecked_ref(),
+                msec,
+            )
+            .unwrap();
+        closure.forget();
+    });
+    JsFuture::from(p)
+        .map(move |_| v)
+        .map_err(|e| panic!("delay errored; err={:?}", e))
 }
 
 #[wasm_bindgen]

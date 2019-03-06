@@ -3,3 +3,4 @@
 /wasm-pack.log
 /pkg.pem
 /pkg/dist
+/pkg/web-ext-artifacts
