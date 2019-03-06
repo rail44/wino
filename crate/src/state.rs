@@ -2,6 +2,7 @@ use atom_syndication::{Entry, Feed as AtomFeed};
 use chrono::{DateTime, FixedOffset};
 use js_sys::Date;
 use rss::{Channel, Item};
+use rss::extension::dublincore::DublinCoreExtension;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -103,9 +104,9 @@ impl Article {
             .pub_date()
             .or_else(|| {
                 item.dublin_core_ext()
-                    .map(|dce| dce.dates())
+                    .map(DublinCoreExtension::dates)
                     .and_then(|date| date.get(0))
-                    .map(|s| s.as_str())
+                    .map(String::as_str)
             })
             .unwrap_or("");
         let date = parse_date(date_str);

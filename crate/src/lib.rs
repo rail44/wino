@@ -35,11 +35,11 @@ mod state;
 
 use state::{Feed, State};
 
-const STATE_KEY: &'static str = "state";
+const STATE_KEY: &str = "state";
 const AUTO_RELOAD_MINUTES: i32 = 5;
 
-const DEFAULT_TITLE: &'static str = "wino";
-const HIGHLIGHT_TITLE: &'static str = "(*)wino";
+const DEFAULT_TITLE: &str = "wino";
+const HIGHLIGHT_TITLE: &str = "(*)wino";
 
 fn timeout<T>(v: T, msec: i32) -> impl Future<Item = T, Error = ()> {
     let p = Promise::new(&mut move |resolve, _| {
@@ -255,7 +255,7 @@ pub fn run() {
         .get_item(STATE_KEY)
         .unwrap()
         .map(|s| serde_json::from_str(&s).unwrap())
-        .unwrap_or(State::default());
+        .unwrap_or_default();
 
     let mut task = Task::empty();
     task.push(Box::new(timeout(
