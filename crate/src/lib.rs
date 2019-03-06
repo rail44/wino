@@ -15,25 +15,25 @@ extern crate wasm_bindgen_futures;
 extern crate web_sys;
 extern crate js_sys;
 
-use atom_syndication::{Feed as AtomFeed, Entry};
-use chrono::{DateTime, FixedOffset};
+use atom_syndication::Feed as AtomFeed;
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
-use rss::{Channel, Item};
+use rss::Channel;
 use squark::{App, Child, HandlerArg, Runtime, Task, View};
 use squark_macros::view;
-use serde::{Serialize, Deserialize};
 use squark_web::WebRuntime;
-use std::collections::HashMap;
 use std::iter::FromIterator;
 use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{console, window, VisibilityState};
-use js_sys::{Date, Promise};
+use js_sys::Promise;
 
 mod fetch;
+mod state;
+
+use state::{State, Feed};
 
 const STATE_KEY: &'static str = "state";
 const AUTO_RELOAD_MINUTES: i32 = 5;
@@ -61,126 +61,11 @@ fn timeout<T>(v: T, msec: i32) -> impl Future<Item = T, Error = ()> {
 #[derive(Clone, Debug)]
 enum Action {
     UpdateNewFeedUrl(String),
+    RemoveFeed(String),
     AddFeed,
     Fetched(String, String),
     Reload,
     AutoReload,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-struct Feed {
-    title: String,
-    url: String,
-    article_map: HashMap<String, Article>,
-    updated: f64,
-}
-
-impl Default for Feed {
-    fn default() -> Self {
-        Feed {
-            title: String::default(),
-            url: String::default(),
-            article_map: HashMap::default(),
-            updated: Date::now(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-struct Article {
-    title: String,
-    date: DateTime<FixedOffset>,
-    url: String,
-}
-
-impl Article {
-    fn from_atom(entry: &Entry) -> Self {
-        let date = parse_date(entry.published().unwrap_or(""));
-        Article {
-            title: entry.title().to_string(),
-            url: entry
-                .links()
-                .get(0)
-                .map_or("", |link| link.href())
-                .to_string(),
-                date,
-        }
-    }
-
-    fn from_rss(item: &Item) -> Self {
-        let date_str = item.pub_date().or_else(|| {
-            item.dublin_core_ext()
-                .map(|dce| dce.dates())
-                .and_then(|date| date.get(0))
-                .map(|s| s.as_str())
-        }).unwrap_or("");
-        let date = parse_date(date_str);
-        let url = item.link().unwrap_or("").to_string();
-        Article {
-            title: item.title().unwrap_or("").to_string(),
-            url: url.clone(),
-            date,
-        }
-    }
-}
-
-#[derive(Deserialize, Clone, Debug, PartialEq, Serialize)]
-struct State {
-    manual_reloaded: bool,
-    new_feed_url: String,
-    is_loading_new_feed: bool,
-    feed_map: HashMap<String, Feed>,
-}
-
-impl Default for State {
-    fn default() -> State {
-        State {
-            manual_reloaded: false,
-            new_feed_url: String::new(),
-            is_loading_new_feed: false,
-            feed_map: HashMap::new(),
-        }
-    }
-}
-
-impl Feed {
-    fn from_atom(url: String, atom: &AtomFeed) -> Self {
-        let mut article_map = HashMap::new();
-
-        for entry in atom.entries() {
-            let id = entry.id();
-            article_map.insert(id.to_string(), Article::from_atom(entry));
-        }
-
-        Feed {
-            article_map,
-            title: atom.title().to_string(),
-            url: url.clone(),
-            updated: Date::now(),
-        }
-    }
-
-    fn from_rss(url: String, channel: &Channel) -> Self {
-        let mut article_map = HashMap::default();
-        for item in channel.items() {
-            let article = Article::from_rss(item);
-            let id = item.guid().map_or_else(|| article.url.clone(), |guid| guid.value().to_string());
-            article_map.insert(id, article);
-        }
-
-        Feed {
-            article_map,
-            title: channel.title().to_string(),
-            url: url.clone(),
-            updated: Date::now(),
-        }
-    }
-}
-
-fn parse_date(s: &str) -> DateTime<FixedOffset> {
-    DateTime::parse_from_rfc3339(s)
-        .or_else(|_| DateTime::parse_from_rfc2822(s))
-        .unwrap()
 }
 
 #[derive(Clone, Debug)]
@@ -205,9 +90,7 @@ impl WinoApp {
             }
             Action::AutoReload => {
                 task.push(Box::new(timeout(Action::AutoReload, 1000 * 60 * AUTO_RELOAD_MINUTES)));
-                if state.manual_reloaded {
-                    task.push(Box::new(timeout(Action::Reload, 0)));
-                }
+                task.push(Box::new(timeout(Action::Reload, 0)));
                 (state, task)
             }
             Action::Reload => {
@@ -235,6 +118,11 @@ impl WinoApp {
                 let rss = Channel::from_str(&resp).unwrap();
                 let feed = Feed::from_rss(feed_url.clone(), &rss);
                 state.feed_map.insert(feed_url.clone(), feed);
+
+                (state, task)
+            }
+            Action::RemoveFeed(url) => {
+                state.feed_map.remove(&url);
 
                 (state, task)
             }
@@ -295,8 +183,13 @@ impl App for WinoApp {
                     <ul>
                     {
                         Child::from_iter(
-                            state.feed_map.values().map(|feed| {
-                                view! { <li>{ feed.title.clone() }</li> }
+                            state.feed_map.clone().into_iter().map(|(key, feed)| {
+                                view! {
+                                    <li>
+                                        { feed.title.clone() }
+                                        <button onclick={ move |_| Some(Action::RemoveFeed(key.to_owned())) }>x</button>
+                                    </li>
+                                }
                             })
                         )
                     }
