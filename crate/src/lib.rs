@@ -1,20 +1,5 @@
 #![feature(proc_macro_hygiene)]
 
-extern crate atom_syndication;
-extern crate chrono;
-extern crate console_error_panic_hook;
-extern crate futures;
-extern crate js_sys;
-extern crate rss;
-extern crate serde;
-extern crate serde_json;
-extern crate squark;
-extern crate squark_macros;
-extern crate squark_web;
-extern crate wasm_bindgen;
-extern crate wasm_bindgen_futures;
-extern crate web_sys;
-
 use atom_syndication::Feed as AtomFeed;
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
