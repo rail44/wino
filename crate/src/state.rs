@@ -1,9 +1,9 @@
-use atom_syndication::{Feed as AtomFeed, Entry};
+use atom_syndication::{Entry, Feed as AtomFeed};
 use chrono::{DateTime, FixedOffset};
-use rss::{Channel, Item};
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
 use js_sys::Date;
+use rss::{Channel, Item};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Serialize)]
 pub struct State {
@@ -62,7 +62,9 @@ impl Feed {
         let mut article_map = HashMap::default();
         for item in channel.items() {
             let article = Article::from_rss(item);
-            let id = item.guid().map_or_else(|| article.url.clone(), |guid| guid.value().to_string());
+            let id = item
+                .guid()
+                .map_or_else(|| article.url.clone(), |guid| guid.value().to_string());
             article_map.insert(id, article);
         }
 
@@ -92,17 +94,20 @@ impl Article {
                 .get(0)
                 .map_or("", |link| link.href())
                 .to_string(),
-                date,
+            date,
         }
     }
 
     fn from_rss(item: &Item) -> Self {
-        let date_str = item.pub_date().or_else(|| {
-            item.dublin_core_ext()
-                .map(|dce| dce.dates())
-                .and_then(|date| date.get(0))
-                .map(|s| s.as_str())
-        }).unwrap_or("");
+        let date_str = item
+            .pub_date()
+            .or_else(|| {
+                item.dublin_core_ext()
+                    .map(|dce| dce.dates())
+                    .and_then(|date| date.get(0))
+                    .map(|s| s.as_str())
+            })
+            .unwrap_or("");
         let date = parse_date(date_str);
         let url = item.link().unwrap_or("").to_string();
         Article {
@@ -118,4 +123,3 @@ fn parse_date(s: &str) -> DateTime<FixedOffset> {
         .or_else(|_| DateTime::parse_from_rfc2822(s))
         .unwrap()
 }
-

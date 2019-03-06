@@ -4,6 +4,7 @@ extern crate atom_syndication;
 extern crate chrono;
 extern crate console_error_panic_hook;
 extern crate futures;
+extern crate js_sys;
 extern crate rss;
 extern crate serde;
 extern crate serde_json;
@@ -13,11 +14,11 @@ extern crate squark_web;
 extern crate wasm_bindgen;
 extern crate wasm_bindgen_futures;
 extern crate web_sys;
-extern crate js_sys;
 
 use atom_syndication::Feed as AtomFeed;
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
+use js_sys::Promise;
 use rss::Channel;
 use squark::{App, Child, HandlerArg, Runtime, Task, View};
 use squark_macros::view;
@@ -28,12 +29,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{console, window, VisibilityState};
-use js_sys::Promise;
 
 mod fetch;
 mod state;
 
-use state::{State, Feed};
+use state::{Feed, State};
 
 const STATE_KEY: &'static str = "state";
 const AUTO_RELOAD_MINUTES: i32 = 5;
@@ -46,15 +46,17 @@ fn timeout<T>(v: T, msec: i32) -> impl Future<Item = T, Error = ()> {
         let closure = Closure::wrap(Box::new(move |_: JsValue| {
             resolve.call0(&JsValue::null()).unwrap();
         }) as Box<FnMut(_)>);
-        window().unwrap()
+        window()
+            .unwrap()
             .set_timeout_with_callback_and_timeout_and_arguments_0(
                 closure.as_ref().unchecked_ref(),
-                msec
-            ).unwrap();
+                msec,
+            )
+            .unwrap();
         closure.forget();
     });
     JsFuture::from(p)
-        .map(move |_|  v )
+        .map(move |_| v)
         .map_err(|e| panic!("delay errored; err={:?}", e))
 }
 
@@ -89,7 +91,10 @@ impl WinoApp {
                 (state, task)
             }
             Action::AutoReload => {
-                task.push(Box::new(timeout(Action::AutoReload, 1000 * 60 * AUTO_RELOAD_MINUTES)));
+                task.push(Box::new(timeout(
+                    Action::AutoReload,
+                    1000 * 60 * AUTO_RELOAD_MINUTES,
+                )));
                 task.push(Box::new(timeout(Action::Reload, 0)));
                 (state, task)
             }
@@ -139,7 +144,6 @@ impl App for WinoApp {
 
         let (state, task) = self._reducer(state, action);
 
-
         if state != old_state {
             let window = window().unwrap();
             let document = window.document().unwrap();
@@ -149,7 +153,9 @@ impl App for WinoApp {
             }
 
             let storage = window.local_storage().unwrap().unwrap();
-            storage.set_item(STATE_KEY, &serde_json::to_string(&state).unwrap()).unwrap();
+            storage
+                .set_item(STATE_KEY, &serde_json::to_string(&state).unwrap())
+                .unwrap();
         }
 
         (state, task)
@@ -252,19 +258,18 @@ pub fn run() {
         .unwrap_or(State::default());
 
     let mut task = Task::empty();
-    task.push(Box::new(timeout(Action::AutoReload, 1000 * 60 * AUTO_RELOAD_MINUTES)));
+    task.push(Box::new(timeout(
+        Action::AutoReload,
+        1000 * 60 * AUTO_RELOAD_MINUTES,
+    )));
 
     let closure = Closure::wrap(Box::new(on_visibility_change) as Box<Fn()>);
-    document.set_onvisibilitychange(
-        Some(closure.as_ref().unchecked_ref())
-    );
+    document.set_onvisibilitychange(Some(closure.as_ref().unchecked_ref()));
     closure.forget();
 
-
     WebRuntime::<WinoApp>::new(
-        document.query_selector("#container")
-            .unwrap()
-            .unwrap(),
-        state
-    ).run_with_task(task);
+        document.query_selector("#container").unwrap().unwrap(),
+        state,
+    )
+    .run_with_task(task);
 }
