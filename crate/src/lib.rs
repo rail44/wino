@@ -55,6 +55,8 @@ extern "C" {
     type Permissions;
     #[wasm_bindgen(method)]
     fn request(this: &Permissions, arg: &JsValue, cb: &Function);
+    #[wasm_bindgen(method)]
+    fn remove(this: &Permissions, arg: &JsValue);
 }
 
 #[derive(Clone, Debug)]
@@ -138,6 +140,7 @@ impl WinoApp {
             }
             Action::RemoveFeed(url) => {
                 state.feed_map.remove(&url);
+                remove_permission(&url);
 
                 (state, task)
             }
@@ -266,6 +269,13 @@ fn request_permission(url: &str) -> impl Future<Item = bool, Error = ()> {
     JsFuture::from(p)
         .map(|b| b.as_bool().unwrap())
         .map_err(|e| panic!("delay errored; err={:?}", e))
+}
+
+fn remove_permission(url: &str) {
+    let arg = json!({
+        "origins": [url]
+    });
+    chrome.permissions().remove(&JsValue::from_serde(&arg).unwrap());
 }
 
 fn timeout<T>(v: T, msec: i32) -> impl Future<Item = T, Error = ()> {
