@@ -1,7 +1,7 @@
 {
     "manifest_version": 2,
     "name": "wino",
-    "version": "1.0",
+    "version": "1.1",
     "description": "RSS Reader",
     "browser_action": {
         "default_icon": "beasts-32.png"
