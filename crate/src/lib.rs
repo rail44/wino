@@ -252,58 +252,76 @@ impl App for WinoApp {
 
     fn view(&self, state: State) -> View<Action> {
         view! {
-            <div>
-                <h1>wino</h1>
-                <section>
-                    <input
-                        value={ state.new_feed_url.clone() }
-                        oninput={ |v| match v {
-                            HandlerArg::String(v) => Some(Action::UpdateNewFeedUrl(v)),
-                            _ => None,
-                        } }
-                        onkeydown={ |v| match v {
-                            HandlerArg::String(ref v) if v.as_str() == "Enter" => {
-                                Some(Action::AddFeed)
-                            }
-                            _ => None,
-                        } }
-                    />
-                </section>
-                <section>
-                    <button onclick={ |_| Some(Action::Reload) }>reload</button>
-                    <button onclick={ |_| Some(Action::Export) }>export</button>
-                    <label>
-                        import
-                        <input id="import" style="visibility:hidden" type="file" onchange={ |_| Some(Action::StartImport) }></input>
-                    </label>
-                </section>
-                <section>
-                    <h2>Feeds</h2>
-                    <ul>
-                    {
-                        Child::from_iter(
-                            state.feed_map.clone().into_iter().enumerate().map(|(i, (key, feed))| {
-                                let key_1 = key.clone();
-                                view! {
-                                    <li>
-                                        <label>{ feed.title.clone() }
-                                            <input
-                                                type="checkbox"
-                                                onclick={ move |_| Some(Action::ToggleFeedVisible(key.to_owned())) }
-                                                checked={feed.visible}
-                                            />
-                                        </label>
-                                        <button onclick={ move |_| Some(Action::RemoveFeed(key_1.to_owned())) }>x</button>
-                                    </li>
+            <div class="columns is-gapless">
+                <div class="column is-3">
+                    <div class="container has-background-light">
+                        <div>
+                            <a class="button is-fullwidth" onclick={ |_| Some(Action::Reload) }>reload</a>
+                        </div>
+                        <div>
+                            <a class="button is-fullwidth" onclick={ |_| Some(Action::Export) }>export</a>
+                        </div>
+                        <div>
+                            <label>
+                                <a class="button is-fullwidth">import</a>
+                                <input id="import" style="visibility:hidden" type="file" onchange={ |_| Some(Action::StartImport) }></input>
+                            </label>
+                        </div>
+                        <section>
+                            <h2>Add Feed</h2>
+                            <div>
+                                <input
+                                    class="input"
+                                    value={ state.new_feed_url.clone() }
+                                    oninput={ |v| match v {
+                                        HandlerArg::String(v) => Some(Action::UpdateNewFeedUrl(v)),
+                                        _ => None,
+                                    } }
+                                    onkeydown={ |v| match v {
+                                        HandlerArg::String(ref v) if v.as_str() == "Enter" => {
+                                            Some(Action::AddFeed)
+                                        }
+                                        _ => None,
+                                    } }
+                                />
+                            </div>
+                            <div>
+                                <div class="list is-hoverable">
+                                {
+                                    Child::from_iter(
+                                        state.feed_map.clone().into_iter().enumerate().map(|(i, (key, feed))| {
+                                            let key_1 = key.clone();
+                                            view! {
+                                                <a class="list-item">
+                                                    <div class="level">
+                                                        <div class="level-left">
+                                                            <label class="checkbox">
+                                                                <input
+                                                                    class="checkbox"
+                                                                    type="checkbox"
+                                                                    onclick={ move |_| Some(Action::ToggleFeedVisible(key.to_owned())) }
+                                                                    checked={feed.visible}
+                                                                />
+
+                                                                { feed.title.clone() }
+                                                            </label>
+                                                        </div>
+                                                        <div class="level-right">
+                                                            <a class="delete" onclick={ move |_| Some(Action::RemoveFeed(key_1.to_owned())) } ></a>
+                                                        </div>
+                                                    </div>
+                                                </a>
+                                            }
+                                        })
+                                    )
                                 }
-                            })
-                        )
-                    }
-                    </ul>
-                </section>
-                <section>
-                    <h2>Articles</h2>
-                    <ul>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+                <div class="column is-small">
+                    <div class="container">
                     {
                         let iter = state.feed_map
                             .values()
@@ -317,12 +335,21 @@ impl App for WinoApp {
                         article_vec.sort_by(|(_, a), (_, b)| b.date.cmp(&a.date));
                         Child::from_iter(
                             article_vec.iter().map(|(feed_title, article)| {
-                                view! { <li>{ feed_title.clone() }: <a target="_blank" href={ article.url.clone() }>{ article.title.clone() }</a></li> }
+                                view! {
+                                    <a target="_blank" href={ article.url.clone() }>
+                                        <div class="card">
+                                            <div class="card-content">
+                                                <p class="subtitle">{ article.title.clone() }</p>
+                                                <p>{ feed_title.clone() }</p>
+                                            </div>
+                                        </div>
+                                    </a>
+                                }
                             })
                         )
                     }
-                    </ul>
-                </section>
+                    </div>
+                </div>
             </div>
         }
     }

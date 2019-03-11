@@ -25,6 +25,7 @@ serde = { version = "1.0.84", features = ["derive"] }
 atom_syndication = "0.6.0"
 chrono = { version = "0.4.6", features = ["serde"] }
 js-sys = "0.3.14"
+bincode = "1.1.2"
 
 [dependencies.web-sys]
 version = "0.3"
@@ -42,4 +43,13 @@ features = [
   "Response",
   "Storage",
   "VisibilityState",
+  "Blob",
+  "BlobPropertyBag",
+  "HtmlLinkElement",
+  "HtmlAnchorElement",
+  "FileList",
+  "HtmlInputElement",
+  "Url",
+  "File",
+  "FileReader",
 ]

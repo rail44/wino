@@ -16,7 +16,7 @@ module.exports = {
     },
     plugins: [
         new HtmlWebpackPlugin({
-            template: 'pkg/index.html'
+            template: './index.html'
         }),
 
         new WasmPackPlugin({
