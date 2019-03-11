@@ -1,6 +1,7 @@
 #![feature(proc_macro_hygiene)]
 
 extern crate atom_syndication;
+extern crate bincode;
 extern crate chrono;
 extern crate console_error_panic_hook;
 extern crate futures;
@@ -18,9 +19,9 @@ extern crate web_sys;
 use atom_syndication::Feed as AtomFeed;
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
-use js_sys::Promise;
-use js_sys::Function;
+use js_sys::{Array, Function, Promise, Uint8Array};
 use rss::Channel;
+use serde_json::json;
 use squark::{App, Child, HandlerArg, Runtime, Task, View};
 use squark_macros::view;
 use squark_web::WebRuntime;
@@ -29,8 +30,12 @@ use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{console, window, VisibilityState};
-use serde_json::json;
+use web_sys::{
+    console, window, Blob, BlobPropertyBag, HtmlAnchorElement, HtmlInputElement, HtmlLinkElement,
+    Url, VisibilityState,
+    FileReader,
+    Event
+};
 
 mod fetch;
 mod state;
@@ -42,7 +47,6 @@ const AUTO_RELOAD_MINUTES: i32 = 5;
 
 const DEFAULT_TITLE: &str = "wino";
 const HIGHLIGHT_TITLE: &str = "(*)wino";
-
 
 #[wasm_bindgen]
 extern "C" {
@@ -70,6 +74,9 @@ enum Action {
     Fetched(String, String),
     Reload,
     AutoReload,
+    Export,
+    StartImport,
+    Import(State),
 }
 
 #[derive(Clone, Debug)]
@@ -146,11 +153,72 @@ impl WinoApp {
                 (state, task)
             }
             Action::ToggleFeedVisible(url) => {
-                state.feed_map
+                state
+                    .feed_map
                     .entry(url)
-                    .and_modify(|f| { f.visible = !f.visible });
+                    .and_modify(|f| f.visible = !f.visible);
 
                 (state, task)
+            }
+            Action::Export => {
+                let data = bincode::serialize(&state).unwrap();
+                console::log_1(&format!("{:?}", data).into());
+                let b = Uint8Array::new(&unsafe { Uint8Array::view(&data) }.into());
+                let mut options = BlobPropertyBag::new();
+                options.type_("application/octet-stream");
+                let array = Array::new();
+                array.push(&b.buffer());
+                let blob =
+                    Blob::new_with_u8_array_sequence_and_options(&array, &options).unwrap();
+                let window = window().unwrap();
+                let document = window.document().unwrap();
+                let body = document.body().unwrap();
+                let a = document.create_element("a").unwrap();
+                let url = Url::create_object_url_with_blob(&blob).unwrap();;
+                (a.unchecked_ref() as &HtmlLinkElement).set_href(&url);
+                (a.unchecked_ref() as &HtmlAnchorElement).set_download("wino_export");
+                body.append_child(&a).unwrap();
+                (a.unchecked_ref() as &HtmlLinkElement).click();
+                Url::revoke_object_url(&url).unwrap();
+                body.remove_child(&a).unwrap();
+
+                (state, task)
+            }
+            Action::StartImport => {
+                let window = window().unwrap();
+                let document = window.document().unwrap();
+                let import: HtmlInputElement = document.get_element_by_id("import").unwrap().unchecked_into();
+                let file = import.files().unwrap().get(0).unwrap();
+                import.set_files(None);
+                let file_reader = FileReader::new().unwrap();
+                let file_reader_1 = file_reader.clone();
+
+                let p = Promise::new(&mut move |resolve, _| {
+                    let file_reader_2 = file_reader_1.clone();
+                    let closure = Closure::wrap(Box::new(move |_: Event| {
+                        let array = Uint8Array::new(&file_reader_2.clone().result().unwrap());
+                        resolve.call1(&JsValue::null(), &array.into()).unwrap();
+                    }) as Box<FnMut(_)>);
+                    file_reader_1.clone().set_onload(Some(closure.as_ref().unchecked_ref()));
+                    closure.forget();
+                });
+                file_reader.read_as_array_buffer(&file).unwrap();
+                let future = JsFuture::from(p)
+                    .map(|array| {
+                        let array: Uint8Array = array.unchecked_into();
+                        let mut buf = vec![0; array.length() as usize];
+                        array.copy_to(&mut buf);
+                        let state = bincode::deserialize(&buf).unwrap();
+                        Action::Import(state)
+                    })
+                    .map_err(|e| panic!("delay errored; err={:?}", e));
+                task.push(Box::new(future));
+
+
+                (state, task)
+            }
+            Action::Import(s) => {
+                (s, task)
             }
         }
     }
@@ -200,10 +268,14 @@ impl App for WinoApp {
                             _ => None,
                         } }
                     />
-                    <button onclick={ |_| Some(Action::AddFeed) }>button</button>
                 </section>
                 <section>
                     <button onclick={ |_| Some(Action::Reload) }>reload</button>
+                    <button onclick={ |_| Some(Action::Export) }>export</button>
+                    <label>
+                        import
+                        <input id="import" style="visibility:hidden" type="file" onchange={ |_| Some(Action::StartImport) }></input>
+                    </label>
                 </section>
                 <section>
                     <h2>Feeds</h2>
@@ -212,16 +284,15 @@ impl App for WinoApp {
                         Child::from_iter(
                             state.feed_map.clone().into_iter().enumerate().map(|(i, (key, feed))| {
                                 let key_1 = key.clone();
-                                let id = format!("feed-{}-toggle", i);
                                 view! {
                                     <li>
-                                        <input
-                                            type="checkbox"
-                                            onclick={ move |_| Some(Action::ToggleFeedVisible(key.to_owned())) }
-                                            checked={feed.visible}
-                                            id={ id.clone() }
-                                        />
-                                        <label for={ id }>{ feed.title.clone() }</id>
+                                        <label>{ feed.title.clone() }
+                                            <input
+                                                type="checkbox"
+                                                onclick={ move |_| Some(Action::ToggleFeedVisible(key.to_owned())) }
+                                                checked={feed.visible}
+                                            />
+                                        </label>
                                         <button onclick={ move |_| Some(Action::RemoveFeed(key_1.to_owned())) }>x</button>
                                     </li>
                                 }
@@ -273,14 +344,15 @@ fn on_visibility_change() {
 }
 
 fn request_permission(url: &str) -> impl Future<Item = bool, Error = ()> {
-    let arg = json!({
-        "origins": [url]
-    });
+    let arg = json!({ "origins": [url] });
     let p = Promise::new(&mut move |resolve, _| {
         let closure = Closure::wrap(Box::new(move |b: bool| {
             resolve.call1(&JsValue::null(), &b.into()).unwrap();
         }) as Box<FnMut(_)>);
-        chrome.permissions().request(&JsValue::from_serde(&arg).unwrap(), closure.as_ref().unchecked_ref());
+        chrome.permissions().request(
+            &JsValue::from_serde(&arg).unwrap(),
+            closure.as_ref().unchecked_ref(),
+        );
         closure.forget();
     });
     JsFuture::from(p)
@@ -289,10 +361,10 @@ fn request_permission(url: &str) -> impl Future<Item = bool, Error = ()> {
 }
 
 fn remove_permission(url: &str) {
-    let arg = json!({
-        "origins": [url]
-    });
-    chrome.permissions().remove(&JsValue::from_serde(&arg).unwrap());
+    let arg = json!({ "origins": [url] });
+    chrome
+        .permissions()
+        .remove(&JsValue::from_serde(&arg).unwrap());
 }
 
 fn timeout<T>(v: T, msec: i32) -> impl Future<Item = T, Error = ()> {

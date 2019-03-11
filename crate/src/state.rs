@@ -1,8 +1,8 @@
 use atom_syndication::{Entry, Feed as AtomFeed};
 use chrono::{DateTime, FixedOffset};
 use js_sys::Date;
-use rss::{Channel, Item};
 use rss::extension::dublincore::DublinCoreExtension;
+use rss::{Channel, Item};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
