@@ -31,10 +31,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
-    console, window, Blob, BlobPropertyBag, HtmlAnchorElement, HtmlInputElement, HtmlLinkElement,
-    Url, VisibilityState,
-    FileReader,
-    Event
+    console, window, Blob, BlobPropertyBag, Event, FileReader, HtmlAnchorElement, HtmlInputElement,
+    HtmlLinkElement, Url, VisibilityState,
 };
 
 mod fetch;
@@ -169,8 +167,7 @@ impl WinoApp {
                 options.type_("application/octet-stream");
                 let array = Array::new();
                 array.push(&b.buffer());
-                let blob =
-                    Blob::new_with_u8_array_sequence_and_options(&array, &options).unwrap();
+                let blob = Blob::new_with_u8_array_sequence_and_options(&array, &options).unwrap();
                 let window = window().unwrap();
                 let document = window.document().unwrap();
                 let body = document.body().unwrap();
@@ -188,7 +185,10 @@ impl WinoApp {
             Action::StartImport => {
                 let window = window().unwrap();
                 let document = window.document().unwrap();
-                let import: HtmlInputElement = document.get_element_by_id("import").unwrap().unchecked_into();
+                let import: HtmlInputElement = document
+                    .get_element_by_id("import")
+                    .unwrap()
+                    .unchecked_into();
                 let file = import.files().unwrap().get(0).unwrap();
                 import.set_files(None);
                 let file_reader = FileReader::new().unwrap();
@@ -200,7 +200,9 @@ impl WinoApp {
                         let array = Uint8Array::new(&file_reader_2.clone().result().unwrap());
                         resolve.call1(&JsValue::null(), &array.into()).unwrap();
                     }) as Box<FnMut(_)>);
-                    file_reader_1.clone().set_onload(Some(closure.as_ref().unchecked_ref()));
+                    file_reader_1
+                        .clone()
+                        .set_onload(Some(closure.as_ref().unchecked_ref()));
                     closure.forget();
                 });
                 file_reader.read_as_array_buffer(&file).unwrap();
@@ -214,7 +216,6 @@ impl WinoApp {
                     })
                     .map_err(|e| panic!("delay errored; err={:?}", e));
                 task.push(Box::new(future));
-
 
                 (state, task)
             }
