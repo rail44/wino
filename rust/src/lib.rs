@@ -219,6 +219,10 @@ impl WinoApp {
                 (state, task)
             }
             Action::Import(s) => {
+                for f in s.feed_map.values() {
+                    let future = request_permission(&f.url).map(|_| Action::Empty);
+                    task.push(Box::new(future));
+                }
                 (s, task)
             }
             Action::ToggleSidebar => {
