@@ -1,8 +1,8 @@
 {
     "manifest_version": 2,
     "name": "wino",
-    "version": "1.2",
-    "description": "RSS Reader",
+    "version": "1.3",
+    "description": "Painful RSS reader WebExtension, almost written by rust.",
     "browser_action": {
         "default_icon": "beasts-32.png"
     },

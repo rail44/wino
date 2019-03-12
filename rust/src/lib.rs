@@ -77,6 +77,7 @@ enum Action {
     Export,
     StartImport,
     Import(State),
+    ToggleSidebar,
 }
 
 #[derive(Clone, Debug)]
@@ -220,6 +221,10 @@ impl WinoApp {
             Action::Import(s) => {
                 (s, task)
             }
+            Action::ToggleSidebar => {
+                state.is_opening_sidebar = !state.is_opening_sidebar;
+                (state, task)
+            }
         }
     }
 }
@@ -251,10 +256,39 @@ impl App for WinoApp {
     }
 
     fn view(&self, state: State) -> View<Action> {
+        let (sidebar_class, menu_button_class) = if !state.is_opening_sidebar {
+            ("column is-3 has-background-light", "is-hidden")
+        } else {
+            ("is-hidden", "")
+        };
         view! {
-            <div class="columns is-gapless">
-                <div class="column is-3">
-                    <div class="container has-background-light">
+            <div>
+                <div class={ menu_button_class } style="position: fixed; top: 16px; left: 16px; opacity: 0.75; z-index: 30">
+                    <a
+                        class="button is-large"
+                        onclick={ move |_| Some(Action::ToggleSidebar) }
+                    >
+                        <span class="icon">
+                            <i
+                                class="fas fa-bars"
+                            ></i>
+                        </span>
+                    </a>
+                </div>
+                <div class="columns is-gapless">
+                    <div class={sidebar_class}>
+                        <section>
+                            <a
+                                class="button is-large is-light"
+                                onclick={ move |_| Some(Action::ToggleSidebar) }
+                            >
+                                <span class="icon">
+                                    <i
+                                        class="fas fa-angle-left"
+                                    ></i>
+                                </span>
+                            </a>
+                        </section>
                         <div>
                             <a class="button is-fullwidth" onclick={ |_| Some(Action::Reload) }>reload</a>
                         </div>
@@ -264,7 +298,7 @@ impl App for WinoApp {
                         <div>
                             <label>
                                 <a class="button is-fullwidth">import</a>
-                                <input id="import" style="visibility:hidden" type="file" onchange={ |_| Some(Action::StartImport) }></input>
+                                <input class="is-invisible" id="import" type="file" onchange={ |_| Some(Action::StartImport) }></input>
                             </label>
                         </div>
                         <section>
@@ -292,14 +326,16 @@ impl App for WinoApp {
                                         state.feed_map.clone().into_iter().enumerate().map(|(i, (key, feed))| {
                                             let key_1 = key.clone();
                                             view! {
-                                                <a class="list-item">
+                                                <a
+                                                    onclick={ move |_| Some(Action::ToggleFeedVisible(key.to_owned())) }
+                                                    class="list-item"
+                                                >
                                                     <div class="level">
                                                         <div class="level-left">
                                                             <label class="checkbox">
                                                                 <input
                                                                     class="checkbox"
                                                                     type="checkbox"
-                                                                    onclick={ move |_| Some(Action::ToggleFeedVisible(key.to_owned())) }
                                                                     checked={feed.visible}
                                                                 />
 
@@ -319,35 +355,35 @@ impl App for WinoApp {
                             </div>
                         </section>
                     </div>
-                </div>
-                <div class="column is-small">
-                    <div class="container">
-                    {
-                        let iter = state.feed_map
-                            .values()
-                            .filter(|feed| feed.visible)
-                            .flat_map(|feed| {
-                                feed.article_map
-                                    .values()
-                                    .map(move |article| (feed.title.clone(), article))
-                            });
-                        let mut article_vec = Vec::from_iter(iter);
-                        article_vec.sort_by(|(_, a), (_, b)| b.date.cmp(&a.date));
-                        Child::from_iter(
-                            article_vec.iter().map(|(feed_title, article)| {
-                                view! {
-                                    <a target="_blank" href={ article.url.clone() }>
-                                        <div class="card">
-                                            <div class="card-content">
-                                                <p class="subtitle">{ article.title.clone() }</p>
-                                                <p>{ feed_title.clone() }</p>
+                    <div class="column is-small">
+                        <div class="">
+                        {
+                            let iter = state.feed_map
+                                .values()
+                                .filter(|feed| feed.visible)
+                                .flat_map(|feed| {
+                                    feed.article_map
+                                        .values()
+                                        .map(move |article| (feed.title.clone(), article))
+                                });
+                            let mut article_vec = Vec::from_iter(iter);
+                            article_vec.sort_by(|(_, a), (_, b)| b.date.cmp(&a.date));
+                            Child::from_iter(
+                                article_vec.iter().map(|(feed_title, article)| {
+                                    view! {
+                                        <a target="_blank" href={ article.url.clone() }>
+                                            <div class="card">
+                                                <div class="card-content">
+                                                    <p class="subtitle">{ article.title.clone() }</p>
+                                                    <p>{ feed_title.clone() }</p>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </a>
-                                }
-                            })
-                        )
-                    }
+                                        </a>
+                                    }
+                                })
+                            )
+                        }
+                        </div>
                     </div>
                 </div>
             </div>

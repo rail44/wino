@@ -14,13 +14,25 @@ module.exports = {
         contentBase: dist,
         host: '0.0.0.0'
     },
+    module: {
+        rules: [
+            {
+                test: /\.css$/,
+                use: ['style-loader', 'css-loader']
+            },
+            {
+                test: /\.(ttf|eot|woff|woff2|svg)$/,
+                use: ['file-loader'],
+            },
+        ]
+    },
     plugins: [
         new HtmlWebpackPlugin({
             template: './index.html'
         }),
 
         new WasmPackPlugin({
-            crateDirectory: path.resolve(__dirname, "crate")
+            crateDirectory: path.resolve(__dirname, "rust")
         }),
     ]
 };

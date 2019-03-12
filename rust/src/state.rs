@@ -7,9 +7,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Serialize)]
+#[serde(default)]
 pub struct State {
     pub new_feed_url: String,
     pub is_loading_new_feed: bool,
+    pub is_opening_sidebar: bool,
     pub feed_map: HashMap<String, Feed>,
 }
 
@@ -18,6 +20,7 @@ impl Default for State {
         State {
             new_feed_url: String::new(),
             is_loading_new_feed: false,
+            is_opening_sidebar: false,
             feed_map: HashMap::new(),
         }
     }
