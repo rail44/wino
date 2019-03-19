@@ -19,7 +19,7 @@ extern crate web_sys;
 use atom_syndication::Feed as AtomFeed;
 use console_error_panic_hook::set_once as set_panic_hook;
 use futures::Future;
-use js_sys::{Array, Function, Promise, Uint8Array};
+use js_sys::{Array, Function, Promise, Uint8Array, encode_uri_component};
 use rss::Channel;
 use serde_json::json;
 use squark::{App, Child, HandlerArg, Runtime, Task, View};
@@ -92,7 +92,7 @@ impl WinoApp {
             }
             Action::AddFeed => {
                 let new_feed_url = state.new_feed_url.clone();
-                let future = request_permission(&new_feed_url).map(|b| {
+                let future = request_permission(&[new_feed_url.clone()]).map(|b| {
                     if b {
                         return Action::Fetch(new_feed_url);
                     }
@@ -220,10 +220,12 @@ impl WinoApp {
                 (state, task)
             }
             Action::Import(s) => {
-                for f in s.feed_map.values() {
-                    let future = request_permission(&f.url).map(|_| Action::Empty);
-                    task.push(Box::new(future));
-                }
+                let urls: Vec<String> = s.feed_map.values().map(|f| f.url.clone()).collect();
+                let future = request_permission(&urls).map(|b| {
+                    console::log_1(&b.into());
+                    Action::Empty
+                });
+                task.push(Box::new(future));
                 (s, task)
             }
             Action::ToggleSidebar => {
@@ -268,7 +270,7 @@ impl App for WinoApp {
         };
         view! {
             <div>
-                <div class={ menu_button_class } style="position: fixed; top: 16px; left: 16px; opacity: 0.75; z-index: 30">
+                <div class={ menu_button_class } style="position: fixed; top: 16px; left: 16px; opacity: 0.5; z-index: 30">
                     <a
                         class="button is-large"
                         onclick={ move |_| Some(Action::ToggleSidebar) }
@@ -375,12 +377,43 @@ impl App for WinoApp {
                             article_vec.sort_by(|(_, a), (_, b)| b.date.cmp(&a.date));
                             Child::from_iter(
                                 article_vec.iter().map(|(feed_title, article)| {
+                                    let encoded_url: String = encode_uri_component(&article.url).into();
+                                    let encoded_title: String = encode_uri_component(&article.title).into();
+                                    let tweet_url = format!(
+                                        "https://twitter.com/intent/tweet?text={}&url={}",
+                                        encoded_title,
+                                        encoded_url
+                                    );
+
+                                    let vein_url = format!(
+                                        "https://open.vein.space/#/post?url={}",
+                                        encoded_url
+                                    );
+
                                     view! {
                                         <a target="_blank" href={ article.url.clone() }>
                                             <div class="card">
                                                 <div class="card-content">
                                                     <p class="subtitle">{ article.title.clone() }</p>
-                                                    <p>{ feed_title.clone() }</p>
+                                                    <div class="level">
+                                                        <div class="level-left">
+                                                            <p>{ feed_title.clone() }</p>
+                                                        </div>
+                                                        <div class="level-right">
+                                                            <div class="columns is-1 is-variable">
+                                                                <div class="column">
+                                                                    <a href={ tweet_url } class="button" target="_new"> 
+                                                                        twitter
+                                                                    </a>
+                                                                </div>
+                                                                <div class="column">
+                                                                    <a href={ vein_url } class="button" target="_new"> 
+                                                                        vein
+                                                                    </a>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </a>
@@ -411,8 +444,8 @@ fn on_visibility_change() {
     }
 }
 
-fn request_permission(url: &str) -> impl Future<Item = bool, Error = ()> {
-    let arg = json!({ "origins": [url] });
+fn request_permission(urls: &[String]) -> impl Future<Item = bool, Error = ()> {
+    let arg = json!({ "origins": urls });
     let p = Promise::new(&mut move |resolve, _| {
         let closure = Closure::wrap(Box::new(move |b: bool| {
             resolve.call1(&JsValue::null(), &b.into()).unwrap();
@@ -472,7 +505,7 @@ pub fn run() {
     let mut task = Task::empty();
     task.push(Box::new(timeout(
         Action::AutoReload,
-        1000 * 60 * AUTO_RELOAD_MINUTES,
+        0
     )));
 
     let closure = Closure::wrap(Box::new(on_visibility_change) as Box<Fn()>);
